@@ -68,16 +68,17 @@ spec:
             - name: http
               containerPort: {{ .Values.containerPort }}
 
-          # --- env：從 K8s Secret 讀取資料庫連線字串 ---
-          # Secret 由 infra repo 的 install-all.sh 建立，不存在本 repo 中
-          # 對齊 infra/install-all.sh:
-          #   kubectl -n myapp create secret generic myapp-db --from-literal=dsn="..."
-          env:
-            - name: {{ .Values.envName }}
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.secret.name }}
-                  key: {{ .Values.secret.key }}
+          # --- env：從 K8s Secret 整包注入所有環境變數 ---
+          # myapp-db：由 infra/install-all.sh 建立（DB 連線）
+          # myapp-env：由 app repo 的 .env 匯入（可選，見 infra README）
+          #   kubectl -n myapp create secret generic myapp-env --from-env-file=.env
+          envFrom:
+            - secretRef:
+                name: {{ .Values.secret.dbSecretName }}
+            {{- if .Values.secret.appSecretEnabled }}
+            - secretRef:
+                name: {{ .Values.secret.appSecretName }}
+            {{- end }}
 
           # --- livenessProbe（存活探針）---
           # 失敗 → K8s 重啟容器

@@ -12,8 +12,8 @@
 #
 # 【跟 infra repo 的對齊關係】
 #   本檔案的值必須跟 stockbot-long-backend-k8s-infra 的設定一致：
-#   - secret.name: "myapp-db"  → 對齊 infra/install-all.sh 建立的 Secret 名稱
-#   - secret.key: "dsn"        → 對齊 infra/install-all.sh 建立的 Secret key
+#   - secret.dbSecretName: "myapp-db"  → 對齊 infra/install-all.sh 建立的 Secret
+#   - secret.appSecretName: "myapp-env" → 對齊 app repo 的 .env 匯入的 Secret
 #   - serviceMonitor.releaseLabel: "monitoring"
 #     → 對齊 infra/install-all.sh 中 Helm release name:
 #        helm upgrade --install monitoring prometheus-community/kube-prometheus-stack
@@ -32,7 +32,7 @@ namespace: myapp
 # CI/CD 流程中，GitHub Actions 會自動更新 image.tag 為最新的 commit SHA
 # 例如：image.tag: "abc1234"
 image:
-  repository: ghcr.io/yourorg/stockbot-long-backend
+  repository: ghcr.io/jason0411202/stockbot-long-backend
   tag: latest
 
 # Go app 監聽的 port
@@ -45,17 +45,17 @@ ingress:
   className: nginx           # 對齊 infra 安裝的 ingress-nginx controller
   maxBodySize: "10m"         # 允許的最大 request body（nginx annotation）
 
-# ---------- Secret（資料庫連線）----------
-# ⚠️ 密碼不在這裡！Secret 由 infra repo 的 install-all.sh 建立在 K8s 裡
-# 這裡只定義「去哪裡找 Secret」
-# 對齊 infra/install-all.sh:
-#   kubectl -n myapp create secret generic myapp-db --from-literal=dsn="..."
+# ---------- Secret（環境變數注入）----------
+# 使用 envFrom 整包注入，不逐一列出
+# ⚠️ 密碼不在這裡！Secret 由外部建立在 K8s 裡
 secret:
-  name: myapp-db             # Secret 名稱（對齊 infra/install-all.sh）
-  key: dsn                   # Secret 中的 key（對齊 infra/install-all.sh）
-
-# 環境變數名稱（Go 程式碼用 os.Getenv("DB_DSN") 讀取）
-envName: DB_DSN
+  # DB 連線 Secret（由 infra/install-all.sh 建立）
+  # 對齊：kubectl -n myapp create secret generic myapp-db --from-literal=dsn="..."
+  dbSecretName: myapp-db
+  # App 環境變數 Secret（可選，由 app repo 的 .env 匯入）
+  # 對齊：kubectl -n myapp create secret generic myapp-env --from-env-file=.env
+  appSecretEnabled: true
+  appSecretName: myapp-env
 
 # ---------- ServiceMonitor（Prometheus 監控）----------
 # 對齊 infra repo：helm upgrade --install monitoring prometheus-community/kube-prometheus-stack
