@@ -1,0 +1,19 @@
+# ============================================================
+# Chart.yaml — Helm Chart 的「身分證」
+# ============================================================
+#
+# 【什麼是 Chart.yaml？】
+#   每個 Helm Chart 都必須有一個 Chart.yaml，它定義了 chart 的名稱、版本等基本資訊。
+#   ArgoCD 看到 repo 裡有 Chart.yaml，就知道要用 Helm 來渲染（而不是 Kustomize）。
+#
+# 【version vs appVersion】
+#   - version：Chart 本身的版本（改 YAML 結構時遞增）
+#   - appVersion：應用程式的版本（跟 Go app 的版本對齊）
+#   兩者獨立管理，chart 改版不代表 app 改版。
+
+apiVersion: v2                              # Helm Chart API 版本（v2 = Helm 3+）
+name: stockbot-long-backend                 # Chart 名稱
+description: Stockbot Long Backend 的 Kubernetes 部署設定
+type: application                           # application = 可部署的 app（vs library = 被其他 chart 引用的工具包）
+version: 0.1.0                              # Chart 版本（遵循 SemVer）
+appVersion: "1.0.0"                         # App 版本（顯示用，不影響部署）

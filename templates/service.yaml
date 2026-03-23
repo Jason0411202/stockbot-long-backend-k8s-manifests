@@ -1,0 +1,39 @@
+# ============================================================
+# Service — Pod 的「穩定入口」與「負載均衡器」
+# ============================================================
+#
+# 【什麼是 Service？】
+#   Pod 的 IP 是動態的（每次重建都會變），外部無法直接穩定地連到 Pod。
+#   Service 提供一個穩定的 DNS 名稱和 ClusterIP，把流量導到背後的 Pod。
+#
+# 【DNS 名稱】
+#   建立後自動產生：<name>.<namespace>.svc.cluster.local
+#   例如：myapp.myapp.svc.cluster.local
+#
+# 【port vs targetPort】
+#   port: 80        → Service 對外暴露的 port（Ingress 連這個）
+#   targetPort: 8080 → 轉發到 Pod 的 port（Go app 監聯的）
+#   流量路徑：Ingress → Service:80 → Pod:8080
+#
+# 【常用指令】
+#   kubectl get svc -n myapp                # 列出 Service
+#   kubectl get endpoints myapp -n myapp    # 查看 Service 背後的 Pod IP 清單
+# ============================================================
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "app.name" . }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "app.labels" . | nindent 4 }}
+spec:
+  # --- selector：流量導到哪些 Pod ---
+  # ⚠️ 要跟 Deployment template.metadata.labels 一致
+  selector:
+    {{- include "app.selectorLabels" . | nindent 4 }}
+
+  ports:
+    - name: http
+      port: 80                              # Service 對外 port
+      targetPort: {{ .Values.containerPort }}  # 轉發到 Pod 的 port

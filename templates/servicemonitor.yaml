@@ -1,0 +1,50 @@
+# ============================================================
+# ServiceMonitor — 告訴 Prometheus「要監控哪些 Service」
+# ============================================================
+#
+# 【什麼是 ServiceMonitor？】
+#   Prometheus Operator 定義的 CRD（Custom Resource Definition）。
+#   告訴 Prometheus「去抓這些 Service 背後的 Pod 的 /metrics 指標」。
+#
+# 【releaseLabel 的重要性】
+#   ⚡ 最常見的踩坑點！
+#   Prometheus Operator 用 serviceMonitorSelector 決定要讀取哪些 ServiceMonitor。
+#   這裡的 release label 必須跟 infra repo 安裝 Prometheus 時的 Helm release name 一致：
+#     helm upgrade --install monitoring prometheus-community/kube-prometheus-stack
+#                              ^^^^^^^^^^
+#   所以 values.yaml 設定 serviceMonitor.releaseLabel: "monitoring"
+#
+# 【enabled 開關】
+#   如果環境沒有裝 Prometheus Operator（沒有 ServiceMonitor CRD），
+#   在 values.yaml 設 serviceMonitor.enabled: false 就不會渲染這個檔案，避免報錯。
+#
+# 【除錯順序】
+#   1. ServiceMonitor 的 release label 對不對？
+#   2. selector 能不能找到 Service？
+#   3. Service 的 selector 能不能找到 Pod？
+#   4. Pod 的 /metrics 端點有沒有回應？
+#   5. Prometheus UI → Status → Targets 確認
+# ============================================================
+
+{{- if .Values.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "app.name" . }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "app.labels" . | nindent 4 }}
+    # ⚡ 必須跟 infra 的 Prometheus Helm release name 一致
+    release: {{ .Values.serviceMonitor.releaseLabel }}
+spec:
+  # --- selector：找到要監控的 Service ---
+  selector:
+    matchLabels:
+      {{- include "app.selectorLabels" . | nindent 6 }}
+
+  # --- endpoints：怎麼抓取指標 ---
+  endpoints:
+    - port: http
+      path: {{ .Values.serviceMonitor.path }}
+      interval: {{ .Values.serviceMonitor.interval }}
+{{- end }}

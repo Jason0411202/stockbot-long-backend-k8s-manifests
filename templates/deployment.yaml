@@ -1,0 +1,106 @@
+# ============================================================
+# Deployment — 管理 Pod 的「部署控制器」
+# ============================================================
+#
+# 【什麼是 Deployment？】
+#   Deployment 是 K8s 最常用的工作負載控制器。它負責：
+#     1. 建立指定數量的 Pod（replicas）
+#     2. 當 Pod 掛掉時自動重建（self-healing）
+#     3. 更新 image 時執行 Rolling Update（零停機部署）
+#     4. 支援 rollback（回滾到上一個版本）
+#
+# 【整體結構】
+#   Deployment
+#     └── spec
+#           ├── selector        → 用 label 找到「屬於我的 Pod」
+#           └── template        → Pod 的模板（長什麼樣子）
+#                 ├── metadata  → Pod 的 label / annotation
+#                 └── spec      → 容器設定（image、port、env、probe、resources）
+#
+# 【Helm 模板重點】
+#   {{ include "app.selectorLabels" . }} — 從 _helpers.tpl 引入共用 labels
+#   {{ .Values.image.repository }}:{{ .Values.image.tag }} — 從 values.yaml 讀 image
+#   toYaml + nindent — 把 values.yaml 的 YAML 結構原封不動插入，並對齊縮排
+#
+# 【常用指令】
+#   kubectl get deploy -n myapp                    # 列出 Deployment
+#   kubectl rollout status deploy/myapp -n myapp   # 看部署進度
+#   kubectl rollout undo deploy/myapp -n myapp     # 回滾到上一版
+# ============================================================
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "app.name" . }}
+  namespace: {{ .Values.namespace }}
+spec:
+  # replicas 不寫死，由 HPA 控制
+  # 如果 HPA 還沒生效，K8s 預設是 1
+
+  # --- selector：用 label 找到「屬於我的 Pod」---
+  # ⚠️ 必須跟下面 template.metadata.labels 一致
+  selector:
+    matchLabels:
+      {{- include "app.selectorLabels" . | nindent 6 }}
+
+  # ---------- Pod 模板 ----------
+  template:
+    metadata:
+      labels:
+        {{- include "app.selectorLabels" . | nindent 8 }}
+
+      # Prometheus Pod 自動發現用的 annotations（與 ServiceMonitor 並行，雙保險）
+      annotations:
+        prometheus.io/scrape: {{ .Values.prometheus.scrape | quote }}
+        prometheus.io/port: {{ .Values.containerPort | quote }}
+        prometheus.io/path: {{ .Values.serviceMonitor.path | quote }}
+
+    spec:
+      containers:
+        - name: {{ include "app.name" . }}
+
+          # --- image ---
+          # CI/CD 會自動更新 values.yaml 的 image.tag 為最新 commit SHA
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+
+          # --- ports ---
+          ports:
+            - name: http
+              containerPort: {{ .Values.containerPort }}
+
+          # --- env：從 K8s Secret 讀取資料庫連線字串 ---
+          # Secret 由 infra repo 的 install-all.sh 建立，不存在本 repo 中
+          # 對齊 infra/install-all.sh:
+          #   kubectl -n myapp create secret generic myapp-db --from-literal=dsn="..."
+          env:
+            - name: {{ .Values.envName }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secret.name }}
+                  key: {{ .Values.secret.key }}
+
+          # --- livenessProbe（存活探針）---
+          # 失敗 → K8s 重啟容器
+          # 用途：偵測 deadlock、記憶體洩漏導致無回應
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.healthCheck.liveness.path }}
+              port: {{ .Values.containerPort }}
+            initialDelaySeconds: {{ .Values.healthCheck.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.healthCheck.liveness.periodSeconds }}
+
+          # --- readinessProbe（就緒探針）---
+          # 失敗 → 從 Service 流量中移除（不重啟）
+          # 用途：app 還在啟動中（連 DB、載入快取）
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.healthCheck.readiness.path }}
+              port: {{ .Values.containerPort }}
+            initialDelaySeconds: {{ .Values.healthCheck.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.healthCheck.readiness.periodSeconds }}
+
+          # --- resources ---
+          # requests：K8s 排程保證的最低資源（HPA 的 CPU% 依據 requests 計算）
+          # limits：資源上限（超過 memory → OOMKill）
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}

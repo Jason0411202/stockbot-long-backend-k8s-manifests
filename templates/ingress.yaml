@@ -1,0 +1,45 @@
+# ============================================================
+# Ingress — 從 cluster 外部進入的「HTTP 路由規則」
+# ============================================================
+#
+# 【什麼是 Ingress？】
+#   定義「外部 HTTP/HTTPS 請求怎麼路由到內部 Service」的規則。
+#   它本身只是規則（像 nginx.conf），真正執行的是 Ingress Controller。
+#
+# 【流量路徑】
+#   使用者瀏覽器 → DNS → Ingress Controller (nginx)
+#     → 比對 host + path → Service:80 → Pod:8080
+#
+# 【跟 infra repo 的關係】
+#   Ingress Controller（nginx）由 infra repo 安裝：
+#     helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx
+#   這裡只定義路由規則，不負責安裝 controller。
+#
+# 【常用指令】
+#   kubectl get ingress -n myapp               # 列出 Ingress
+#   kubectl describe ingress myapp -n myapp    # 查看詳細
+# ============================================================
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "app.name" . }}
+  namespace: {{ .Values.namespace }}
+  annotations:
+    # 允許 request body 最大 {{ .Values.ingress.maxBodySize }}（nginx annotation）
+    nginx.ingress.kubernetes.io/proxy-body-size: {{ .Values.ingress.maxBodySize | quote }}
+spec:
+  # 對齊 infra 安裝的 ingress-nginx controller
+  ingressClassName: {{ .Values.ingress.className }}
+
+  rules:
+    - host: {{ .Values.ingress.host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "app.name" . }}
+                port:
+                  number: 80          # Service 的 port（不是 Pod 的 containerPort）

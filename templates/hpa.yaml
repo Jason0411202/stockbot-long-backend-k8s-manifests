@@ -1,0 +1,47 @@
+# ============================================================
+# HPA (HorizontalPodAutoscaler) — 自動水平擴縮 Pod 數量
+# ============================================================
+#
+# 【什麼是 HPA？】
+#   根據 CPU 使用率自動增減 Pod 副本數。
+#   忙的時候多開幾個 Pod 分散壓力，閒的時候縮回去省資源。
+#
+# 【計算公式】
+#   期望副本數 = ceil( 目前副本數 × 目前CPU% / 目標CPU% )
+#   範例：2 個 Pod，平均 90% → ceil(2 × 90/70) = 3 個 Pod
+#
+# 【targetCPU 的基準】
+#   ⚠️ 百分比是相對於 resources.requests.cpu，不是 limits！
+#   requests.cpu = 50m，targetCPU = 70 → 超過 35m 就開始擴容
+#
+# 【HPA vs Deployment replicas】
+#   HPA 啟用後會覆蓋 Deployment 的 replicas 值。
+#   所以 deployment.yaml 裡故意不寫 replicas，完全交給 HPA 控制。
+#
+# 【常用指令】
+#   kubectl get hpa -n myapp              # 查看 HPA 狀態
+#   kubectl top pods -n myapp             # 查看 Pod 實際資源用量
+# ============================================================
+
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "app.name" . }}
+  namespace: {{ .Values.namespace }}
+spec:
+  # --- scaleTargetRef：HPA 要控制哪個 Deployment ---
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "app.name" . }}
+
+  minReplicas: {{ .Values.hpa.minReplicas }}
+  maxReplicas: {{ .Values.hpa.maxReplicas }}
+
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.hpa.targetCPU }}
