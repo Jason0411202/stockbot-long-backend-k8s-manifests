@@ -1,59 +1,136 @@
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: myapp
-  namespace: myapp
-spec:
-  replicas: 1
+# ============================================================
+# Deployment — 管理 Pod 的「部署控制器」
+# ============================================================
+#
+# 【什麼是 Deployment？】
+#   Deployment 是 K8s 最常用的工作負載控制器。它負責：
+#     1. 建立指定數量的 Pod（replicas）
+#     2. 當 Pod 掛掉時自動重建（self-healing）
+#     3. 更新 image 時執行 Rolling Update（零停機部署）
+#     4. 支援 rollback（回滾到上一個版本）
+#
+# 【Deployment vs Pod】
+#   你可以直接建一個 Pod，但它掛了就沒了。
+#   Deployment 會確保「永遠有 N 個 Pod 在跑」。
+#
+# 【整體結構】
+#   Deployment
+#     └── spec
+#           ├── replicas        → 要跑幾個 Pod
+#           ├── selector        → 用 label 找到「屬於我的 Pod」
+#           └── template        → Pod 的模板（長什麼樣子）
+#                 ├── metadata  → Pod 的 label / annotation
+#                 └── spec      → 容器設定（image、port、env、probe、resources）
+#
+# 【教學重點】
+#   - selector.matchLabels 必須跟 template.metadata.labels 一致
+#   - livenessProbe：K8s 定期戳這個端點，失敗 → 重啟 Pod
+#   - readinessProbe：K8s 定期戳這個端點，失敗 → 從 Service 流量中移除
+#   - resources：設定 CPU / 記憶體的 requests（保證）和 limits（上限）
+#
+# 【常用指令】
+#   kubectl get deploy -n myapp                    # 列出 Deployment
+#   kubectl describe deploy myapp -n myapp         # 查看詳細狀態
+#   kubectl rollout status deploy/myapp -n myapp   # 看部署進度
+#   kubectl rollout undo deploy/myapp -n myapp     # 回滾到上一版
+#   kubectl scale deploy myapp --replicas=3 -n myapp  # 手動擴縮
+# ============================================================
 
+# ---------- 基本資訊 ----------
+apiVersion: apps/v1     # API 版本：Deployment 屬於 apps 群組 v1 版
+kind: Deployment        # 資源類型：Deployment（部署控制器）
+metadata:
+  name: myapp           # Deployment 的名稱
+  namespace: myapp      # 放在哪個 Namespace（對應 namespace.yaml 建立的）
+
+# ---------- Deployment 規格 ----------
+spec:
+  replicas: 1           # 要維持幾個 Pod 副本（HPA 啟用後會自動覆蓋這個值）
+
+  # --- selector：告訴 Deployment 用什麼 label 找到「屬於我的 Pod」---
+  # ⚠️ 必須跟下面 template.metadata.labels 一致，否則 Deployment 建不起來
   selector:
     matchLabels:
-      app: myapp
+      app: myapp        # 篩選條件：label app=myapp 的 Pod 歸我管
 
+  # ---------- Pod 模板（每個 Pod 長什麼樣子）----------
   template:
     metadata:
+      # --- labels：Pod 的標籤 ---
+      # Service 靠這個 label 找到要導流量的 Pod
+      # HPA 也靠 Deployment 的 selector 找到要擴縮的 Pod
       labels:
-        app: myapp
+        app: myapp      # ⚠️ 必須跟上面 selector.matchLabels 一致
 
+      # --- annotations：Pod 的註解（不影響選擇，只是附加資訊）---
+      # 這三行是給 Prometheus 看的，告訴它：
+      #   「這個 Pod 要被抓指標，port 8080，路徑 /metrics」
       annotations:
-        prometheus.io/scrape: "true"
-        prometheus.io/port: "8080"
-        prometheus.io/path: "/metrics"
+        prometheus.io/scrape: "true"    # 啟用 Prometheus 抓取
+        prometheus.io/port: "8080"      # 指標端口
+        prometheus.io/path: "/metrics"  # 指標路徑
 
     spec:
       containers:
-        - name: myapp
+        - name: myapp   # 容器名稱（一個 Pod 可以有多個容器，每個要有唯一名稱）
+
+          # --- image：要跑的 Docker image ---
+          # CI/CD 流程中，GitHub Actions 會自動把 :latest 改成具體的 SHA tag
+          # 例如 ghcr.io/yourorg/stockbot-long-backend:abc1234
+          # 這個替換是透過 kustomization.yaml 的 images 欄位完成的
           image: ghcr.io/yourorg/stockbot-long-backend:latest
 
+          # --- ports：容器要開放的端口 ---
           ports:
-            - name: http
-              containerPort: 8080
+            - name: http          # 端口名稱（Service 和 ServiceMonitor 會用這個名稱來參照）
+              containerPort: 8080 # Go app 監聽的 port（對應程式碼裡的 :8080）
 
+          # --- env：環境變數 ---
+          # 這裡從 K8s Secret 讀取資料庫連線字串，而不是寫死在 YAML 裡
+          # Secret 由 infra repo 的 install-all.sh 建立，不存在本 repo 中
           env:
-            - name: DB_DSN
+            - name: DB_DSN                # 環境變數名稱（Go 程式碼用 os.Getenv("DB_DSN") 讀取）
               valueFrom:
                 secretKeyRef:
-                  name: myapp-db
-                  key: dsn
+                  name: myapp-db          # K8s Secret 的名稱
+                  key: dsn                # Secret 裡的 key（一個 Secret 可以存多組 key-value）
 
+          # --- livenessProbe（存活探針）---
+          # K8s 每隔 periodSeconds 秒去戳一次 /health
+          # 如果連續失敗（預設 3 次），K8s 會重啟這個容器
+          # 用途：偵測程式卡死（deadlock）、記憶體洩漏導致無回應等情況
           livenessProbe:
             httpGet:
-              path: /health
+              path: /health       # Go app 要實作的健康檢查端點
               port: 8080
-            initialDelaySeconds: 5
-            periodSeconds: 10
+            initialDelaySeconds: 5  # Pod 啟動後等 5 秒才開始探測（給 app 時間初始化）
+            periodSeconds: 10       # 每 10 秒探測一次
 
+          # --- readinessProbe（就緒探針）---
+          # 跟 livenessProbe 類似，但失敗時不會重啟，而是把 Pod 從 Service 的流量中移除
+          # 用途：app 還在啟動中（連 DB、載入快取），還沒準備好接收請求
+          # 等 readiness 通過後，Service 才會把流量導到這個 Pod
           readinessProbe:
             httpGet:
-              path: /ready
+              path: /ready        # Go app 要實作的就緒檢查端點（可能檢查 DB 連線是否正常）
               port: 8080
-            initialDelaySeconds: 5
-            periodSeconds: 10
+            initialDelaySeconds: 5  # Pod 啟動後等 5 秒才開始探測
+            periodSeconds: 10       # 每 10 秒探測一次
 
+          # --- resources（資源限制）---
+          # requests：K8s 排程器保證至少給你這麼多資源（影響 Pod 被排到哪個 Node）
+          # limits：容器最多能用多少資源（超過 memory limit → Pod 被 OOMKill）
+          #
+          # CPU 單位：1000m = 1 核心，50m = 0.05 核心
+          # Memory 單位：Mi = MiB（1 MiB = 1024 KiB）
+          #
+          # ⚠️ HPA 的 CPU 百分比是依據 requests 計算的：
+          #    如果 requests.cpu=50m，averageUtilization=70%，
+          #    那麼平均每個 Pod 用到 35m 時就會觸發擴容
           resources:
             requests:
-              cpu: 50m
-              memory: 32Mi
+              cpu: 50m            # 保證分配 0.05 核心（最低需求）
+              memory: 32Mi        # 保證分配 32 MiB 記憶體
             limits:
-              cpu: 250m
-              memory: 128Mi
+              cpu: 250m           # 最多使用 0.25 核心（突發流量時可以多用一點）
+              memory: 128Mi       # 最多使用 128 MiB（超過就會被 OOMKill）

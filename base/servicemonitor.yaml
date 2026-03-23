@@ -1,15 +1,70 @@
-apiVersion: monitoring.coreos.com/v1
-kind: ServiceMonitor
+# ============================================================
+# ServiceMonitor — 告訴 Prometheus「要監控哪些 Service」
+# ============================================================
+#
+# 【什麼是 ServiceMonitor？】
+#   ServiceMonitor 是 Prometheus Operator 定義的 CRD（Custom Resource Definition）。
+#   它不是 K8s 內建的資源，需要先安裝 Prometheus Operator 才能使用。
+#   作用：告訴 Prometheus「去抓這些 Service 背後的 Pod 的指標（metrics）」。
+#
+# 【為什麼不直接在 Prometheus 設定檔裡寫 scrape target？】
+#   傳統做法是手動編輯 prometheus.yml 加入 scrape target，
+#   但在 K8s 環境裡 Pod 數量和 IP 隨時在變，手動維護不切實際。
+#   ServiceMonitor 讓 Prometheus 自動發現要監控的目標。
+#
+# 【ServiceMonitor 怎麼運作？】
+#   1. ServiceMonitor 用 selector 找到符合條件的 Service
+#   2. Prometheus Operator 讀取 ServiceMonitor，自動更新 Prometheus 的 scrape 設定
+#   3. Prometheus 透過 Service 的 Endpoints 找到所有 Pod IP
+#   4. Prometheus 定期去每個 Pod 的 /metrics 路徑抓取指標
+#
+# 【labels.release: monitoring 的重要性】
+#   ⚡ 這是最常見的踩坑點！
+#   Prometheus Operator 用 serviceMonitorSelector 決定要讀取哪些 ServiceMonitor。
+#   如果 Helm 安裝 kube-prometheus-stack 時 release name 是 "monitoring"，
+#   那 Prometheus 只會讀取帶有 release: monitoring label 的 ServiceMonitor。
+#   如果這個 label 不對，Prometheus 根本看不到你的 ServiceMonitor → 指標抓不到。
+#
+# 【指標（Metrics）是什麼？】
+#   Go app 用 prometheus client library 在 /metrics 端點暴露數值，例如：
+#     http_requests_total{method="GET", path="/api/stocks"} 1234
+#     http_request_duration_seconds_bucket{le="0.5"} 987
+#   Prometheus 定期來抓這些數值，存成時序資料，就能在 Grafana 畫圖表了。
+#
+# 【常用指令】
+#   kubectl get servicemonitor -n myapp        # 列出 ServiceMonitor
+#   kubectl describe servicemonitor myapp -n myapp  # 查看詳細
+#
+# 【除錯技巧】
+#   如果 Prometheus 沒有抓到指標，檢查順序：
+#     1. ServiceMonitor 的 release label 對不對
+#     2. ServiceMonitor 的 selector 能不能找到 Service
+#     3. Service 的 selector 能不能找到 Pod
+#     4. Pod 的 /metrics 端點有沒有回應
+#   可以在 Prometheus UI → Status → Targets 確認 scrape target 狀態
+# ============================================================
+
+apiVersion: monitoring.coreos.com/v1    # API 版本：Prometheus Operator 的 CRD
+kind: ServiceMonitor                    # 資源類型：ServiceMonitor（非 K8s 內建）
 metadata:
-  name: myapp
-  namespace: myapp
+  name: myapp                           # ServiceMonitor 名稱
+  namespace: myapp                      # 所屬 Namespace
   labels:
+    # ⚡ 關鍵！這個 label 必須跟 Prometheus Operator 的 serviceMonitorSelector 匹配
+    # 如果用 Helm 安裝 kube-prometheus-stack，release name 是 "monitoring"，
+    # 那這裡就要寫 release: monitoring，否則 Prometheus 會忽略這個 ServiceMonitor
     release: monitoring
+
 spec:
+  # --- selector：找到要監控的 Service ---
+  # 所有 label 含 app=myapp 的 Service 都會被這個 ServiceMonitor 監控
+  # 對應 service.yaml 的 metadata.labels.app: myapp
   selector:
     matchLabels:
       app: myapp
+
+  # --- endpoints：定義怎麼抓取指標 ---
   endpoints:
-    - port: http
-      path: /metrics
-      interval: 15s
+    - port: http            # 使用 Service 中名稱為 "http" 的 port（service.yaml 定義的）
+      path: /metrics        # 指標端點路徑（Go app 暴露 Prometheus metrics 的路徑）
+      interval: 15s         # 每 15 秒抓取一次指標（預設是 30s，視需求調整）
