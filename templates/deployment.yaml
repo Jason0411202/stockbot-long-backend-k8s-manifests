@@ -73,12 +73,12 @@ spec:
           # myapp-env：由 app repo 的 .env 匯入（可選，見 infra README）
           #   kubectl -n myapp create secret generic myapp-env --from-env-file=.env
           envFrom:
-            - secretRef:
-                name: {{ .Values.secret.dbSecretName }}
             {{- if .Values.secret.appSecretEnabled }}
             - secretRef:
                 name: {{ .Values.secret.appSecretName }}
             {{- end }}
+            - secretRef:
+                name: {{ .Values.secret.dbSecretName }}
 
           # --- livenessProbe（存活探針）---
           # 失敗 → K8s 重啟容器
