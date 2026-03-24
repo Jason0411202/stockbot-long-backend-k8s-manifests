@@ -30,10 +30,10 @@ namespace: myapp
 
 # ---------- Container Image ----------
 # CI/CD 流程中，GitHub Actions 會自動更新 image.tag 為最新的 commit SHA
-# 例如：image.tag: "9e29643178f56e18725387073710a064f611bf08"
+# 例如：image.tag: "621fb5354cb645464d648df14a483c640a7ead88"
 image:
   repository: ghcr.io/jason0411202/stockbot-long-backend
-  tag: "9e29643178f56e18725387073710a064f611bf08"
+  tag: "621fb5354cb645464d648df14a483c640a7ead88"
 
 # Go app 監聽的 port
 containerPort: 8080
